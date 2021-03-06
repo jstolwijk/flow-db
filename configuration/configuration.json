@@ -1,0 +1,13 @@
+{
+  "dataStreams": [
+    {
+      "name": "events",
+      "policy": {
+        "hot": "1W",
+        "warm": "1M",
+        "cold": "1Y",
+        "delete": "7Y"
+      }
+    }
+  ]
+}

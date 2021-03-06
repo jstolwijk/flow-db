@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/jstolwijk/flow-db/configuration.schema.json",
+  "title": "Configuration",
+  "description": "Flow DB configuration",
+  "type": "object",
+  "properties": {
+    "dataStreams": {
+      "type": "array",
+      "items": [
+        {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "policy": {
+              "type": "object",
+              "properties": {
+                "hot": {
+                  "type": "string"
+                },
+                "warm": {
+                  "type": "string"
+                },
+                "cold": {
+                  "type": "string"
+                },
+                "delete": {
+                  "type": "string"
+                }
+              },
+              "required": ["hot", "warm", "cold", "delete"]
+            }
+          },
+          "required": ["name", "policy"]
+        }
+      ]
+    }
+  },
+  "required": ["dataStreams"]
+}
