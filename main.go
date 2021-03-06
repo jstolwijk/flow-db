@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -8,6 +9,7 @@ import (
 
 	badger "github.com/dgraph-io/badger/v3"
 	"github.com/gin-gonic/gin"
+	"github.com/qri-io/jsonschema"
 )
 
 type FlowDatabase struct {
@@ -36,6 +38,9 @@ func main() {
 			"status": "UP",
 		})
 	})
+
+	ctx := context.Background()
+
 	r.POST("/index", func(c *gin.Context) {
 		var body interface{}
 		if err := c.ShouldBindJSON(&body); err != nil {
@@ -44,11 +49,52 @@ func main() {
 		}
 
 		rawBody, err := json.Marshal(body)
+
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
 
+		// Validate
+		var schemaData = []byte(`{
+			"$schema": "https://json-schema.org/draft/2019-09/schema",
+			"type": "object",
+			"properties": {
+			  "type": {
+				"type": "string"
+			  },
+			  "quantity": {
+				"type": "integer"
+			  },
+			  "quality": {
+				"type": "string",
+				"enum": ["AAA", "A", "B", "C"]
+			  },
+			  "owner": {
+				"type": "string"
+			  }
+			},
+			"required": ["type", "quantity", "quality"]
+		  }
+		  `)
+
+		rs := &jsonschema.Schema{}
+		if err := json.Unmarshal(schemaData, rs); err != nil {
+			panic("unmarshal schema: " + err.Error())
+		}
+
+		errs, err := rs.ValidateBytes(ctx, rawBody)
+		if err != nil {
+			panic(err)
+		}
+
+		if len(errs) > 0 {
+			fmt.Println(errs[0].Error())
+			c.JSON(http.StatusBadRequest, errs)
+			return
+		}
+
+		// Store
 		id, err := seq.Next()
 
 		if err != nil {
