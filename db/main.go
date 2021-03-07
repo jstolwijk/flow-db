@@ -215,7 +215,7 @@ func main() {
 			for it.Seek(startKey); it.ValidForPrefix(keyPrefix); it.Next() {
 				item := it.Item()
 
-				if numberOfItems >= 500 {
+				if numberOfItems >= 100 {
 					return nil
 				}
 
