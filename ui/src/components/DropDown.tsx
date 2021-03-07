@@ -4,7 +4,7 @@ export interface DropDownProps {
   options: Option[];
   name: string;
   id: string;
-  value: string;
+  value: string | null;
   onValueSelected: (value: string) => void;
 }
 
@@ -15,9 +15,11 @@ export interface Option {
 
 const DropDown: React.FC<DropDownProps> = ({ options, name, id, onValueSelected, value }) => {
   return (
-    <select name={name} id={id} value={value} onChange={(e) => onValueSelected(e.target.value)}>
-      {options.map((option) => (
-        <option value={option.value}>{option.title}</option>
+    <select name={name} id={id} value={value || options[0].value} onChange={(e) => onValueSelected(e.target.value)}>
+      {options.map((option, index) => (
+        <option key={index} value={option.value}>
+          {option.title}
+        </option>
       ))}
     </select>
   );

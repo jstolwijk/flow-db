@@ -10,8 +10,8 @@ const Configuration = () => {
   return (
     <div>
       <ul>
-        {data.map((dataStream: string) => (
-          <li>{dataStream}</li>
+        {data.map((dataStream: string, index: number) => (
+          <li key={index}>{dataStream}</li>
         ))}
       </ul>
     </div>
