@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"time"
 
 	badger "github.com/dgraph-io/badger/v3"
 	"github.com/gin-gonic/gin"
@@ -159,14 +160,68 @@ func main() {
 		}
 
 		err = db.Update(func(txn *badger.Txn) error {
-			key := fmt.Sprintf("streams@%v/documents/%v", streamName, id)
+			documentKey := fmt.Sprintf("streams@%v/documents/%v", streamName, id)
 
-			return txn.Set([]byte(key), rawBody)
+			err := txn.Set([]byte(documentKey), rawBody)
+
+			if err != nil {
+				return err
+			}
+
+			secs := time.Now().Unix()
+			key := fmt.Sprintf("streams@%v/indices/%d/%v", streamName, secs, id)
+			err = txn.Set([]byte(key), []byte(documentKey))
+
+			return err
 		})
 
 		c.JSON(http.StatusCreated, gin.H{
 			"_id": id,
 		})
+	})
+
+	r.GET("/data-streams/:streamName/recent", func(c *gin.Context) {
+		streamName := c.Param("streamName")
+		keyPrefix := []byte(fmt.Sprintf("streams@%v/indices/", streamName))
+
+		items := make([][]byte, 0)
+
+		db.View(func(txn *badger.Txn) error {
+			it := txn.NewIterator(badger.DefaultIteratorOptions)
+			defer it.Close()
+			for it.Seek(keyPrefix); it.ValidForPrefix(keyPrefix); it.Next() {
+				item := it.Item()
+				k := item.Key()
+				err := item.Value(func(v []byte) error {
+					fmt.Printf("key=%s, value=%s\n", k, v)
+
+					item, err = txn.Get(v)
+
+					if err != nil {
+						return err
+					}
+
+					return item.Value(func(v []byte) error {
+						items = append(items, v)
+						return nil
+					})
+				})
+				if err != nil {
+					return err
+				}
+			}
+			return nil
+		})
+
+		data, err := ToJSONArray(items)
+
+		if err != nil {
+			c.Status(http.StatusInternalServerError)
+			return
+		}
+
+		c.Header("Content-Type", "application/json")
+		c.Writer.Write(data)
 	})
 
 	r.GET("/data-streams/:streamName/documents/:documentID", func(c *gin.Context) {
