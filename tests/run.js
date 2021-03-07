@@ -4,7 +4,7 @@ const chunk = (arr, size) =>
   Array.from({ length: Math.ceil(arr.length / size) }, (v, i) => arr.slice(i * size, i * size + size));
 
 (async () => {
-  const resp = await fetch("http://localhost:8080/configurations", {
+  const resp = await fetch("http://localhost:8080/api/configurations", {
     method: "POST",
     body: JSON.stringify(require("./test-configuration.json")),
   });
@@ -14,11 +14,11 @@ const chunk = (arr, size) =>
   }
   console.log("Hi");
 
-  for (let i = 0; i < 100; i++) {
+  for (let i = 0; i < 5; i++) {
     const array = Array(100000).fill(0);
     await Promise.all(
       chunk(array, 10000).map((item, index) =>
-        fetch("http://localhost:8080/data-streams/cars/documents", {
+        fetch("http://localhost:8080/api/data-streams/cars/documents", {
           method: "POST",
           body: JSON.stringify(
             item.map((item, i2) => ({

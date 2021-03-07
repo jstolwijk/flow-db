@@ -40,7 +40,7 @@ func main() {
 	defer seq.Release()
 
 	r := gin.Default()
-	r.GET("/health", func(c *gin.Context) {
+	r.GET("/api/health", func(c *gin.Context) {
 		c.JSON(200, gin.H{
 			"status": "UP",
 		})
@@ -48,7 +48,7 @@ func main() {
 
 	ctx := context.Background()
 
-	r.POST("/configurations", func(c *gin.Context) {
+	r.POST("/api/configurations", func(c *gin.Context) {
 		var body newConfigurationCommand
 		if err := c.BindJSON(&body); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -80,7 +80,7 @@ func main() {
 		c.Status(http.StatusAccepted)
 	})
 
-	r.GET("/configurations/current", func(c *gin.Context) {
+	r.GET("/api/configurations/current", func(c *gin.Context) {
 		var item *badger.Item
 		err := db.View(func(txn *badger.Txn) error {
 			item, err = txn.Get([]byte("streams"))
@@ -103,7 +103,7 @@ func main() {
 	})
 
 	// Changed api to post multiple requests at a time atm
-	r.POST("/data-streams/:streamName/documents", func(c *gin.Context) {
+	r.POST("/api/data-streams/:streamName/documents", func(c *gin.Context) {
 		streamName := c.Param("streamName")
 
 		var body []interface{}
@@ -184,7 +184,7 @@ func main() {
 		})
 	})
 
-	r.GET("/data-streams/:streamName/recent", func(c *gin.Context) {
+	r.GET("/api/data-streams/:streamName/recent", func(c *gin.Context) {
 		streamName := c.Param("streamName")
 		query := c.Request.URL.Query()
 		ascending := query.Get("order") == "ASC"
@@ -252,7 +252,7 @@ func main() {
 		c.Writer.Write(data)
 	})
 
-	r.GET("/data-streams/:streamName/documents/:documentID", func(c *gin.Context) {
+	r.GET("/api/data-streams/:streamName/documents/:documentID", func(c *gin.Context) {
 		streamName := c.Param("streamName")
 		documentID := c.Param("documentID")
 
