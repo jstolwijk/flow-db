@@ -29,7 +29,7 @@ func main() {
 	// load index cache from disk on startup
 
 	// Run database in memory for testing
-	db, err := badger.Open(badger.DefaultOptions("").WithInMemory(true))
+	db, err := badger.Open(badger.DefaultOptions("C:\\Users\\Jesse\\Projects\\flow-db\\data").WithInMemory(false))
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -102,81 +102,85 @@ func main() {
 		}
 	})
 
+	// Changed api to post multiple requests at a time atm
 	r.POST("/data-streams/:streamName/documents", func(c *gin.Context) {
 		streamName := c.Param("streamName")
 
-		var body interface{}
+		var body []interface{}
 		if err := c.ShouldBindJSON(&body); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
 
-		rawBody, err := json.Marshal(body)
+		for _, i := range body {
 
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-
-		// Validate
-		var item *badger.Item
-		err = db.View(func(txn *badger.Txn) error {
-			key := fmt.Sprintf("streams@%v/schema", streamName)
-			item, err = txn.Get([]byte(key))
-			return err
-		})
-
-		if err != nil {
-			c.Status(http.StatusInternalServerError)
-		}
-
-		rs := &jsonschema.Schema{}
-
-		err = item.Value(func(val []byte) error {
-			if err := json.Unmarshal(val, rs); err != nil {
-				panic("unmarshal schema: " + err.Error())
-			}
-
-			return err
-		})
-
-		errs, err := rs.ValidateBytes(ctx, rawBody)
-		if err != nil {
-			panic(err)
-		}
-
-		if len(errs) > 0 {
-			fmt.Println(errs[0].Error())
-			c.JSON(http.StatusBadRequest, errs)
-			return
-		}
-
-		// Store
-		id, err := seq.Next()
-
-		if err != nil {
-			c.Status(http.StatusInternalServerError)
-			return
-		}
-
-		err = db.Update(func(txn *badger.Txn) error {
-			documentKey := fmt.Sprintf("streams@%v/documents/%v", streamName, id)
-
-			err := txn.Set([]byte(documentKey), rawBody)
+			rawBody, err := json.Marshal(i)
 
 			if err != nil {
-				return err
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+				return
 			}
 
-			secs := time.Now().Unix()
-			key := fmt.Sprintf("streams@%v/indices/%d/%v", streamName, secs, id)
-			err = txn.Set([]byte(key), []byte(documentKey))
+			// Validate
+			var item *badger.Item
+			err = db.View(func(txn *badger.Txn) error {
+				key := fmt.Sprintf("streams@%v/schema", streamName)
+				item, err = txn.Get([]byte(key))
+				return err
+			})
 
-			return err
-		})
+			if err != nil {
+				c.Status(http.StatusInternalServerError)
+			}
 
+			rs := &jsonschema.Schema{}
+
+			err = item.Value(func(val []byte) error {
+				if err := json.Unmarshal(val, rs); err != nil {
+					panic("unmarshal schema: " + err.Error())
+				}
+
+				return err
+			})
+
+			errs, err := rs.ValidateBytes(ctx, rawBody)
+			if err != nil {
+				panic(err)
+			}
+
+			if len(errs) > 0 {
+				fmt.Println(errs[0].Error())
+				c.JSON(http.StatusBadRequest, errs)
+				return
+			}
+
+			// Store
+			id, err := seq.Next()
+
+			if err != nil {
+				c.Status(http.StatusInternalServerError)
+				return
+			}
+
+			err = db.Update(func(txn *badger.Txn) error {
+				documentKey := fmt.Sprintf("streams@%v/documents/%v", streamName, id)
+
+				err := txn.Set([]byte(documentKey), rawBody)
+
+				if err != nil {
+					return err
+				}
+
+				secs := time.Now().Unix()
+				key := fmt.Sprintf("streams@%v/indices/%d/%v", streamName, secs, id)
+				err = txn.Set([]byte(key), []byte(documentKey))
+
+				return err
+			})
+
+		}
 		c.JSON(http.StatusCreated, gin.H{
-			"_id": id,
+			"_id": "todo",
 		})
 	})
 

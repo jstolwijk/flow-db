@@ -1,5 +1,8 @@
 const fetch = require("node-fetch");
 
+const chunk = (arr, size) =>
+  Array.from({ length: Math.ceil(arr.length / size) }, (v, i) => arr.slice(i * size, i * size + size));
+
 (async () => {
   const resp = await fetch("http://localhost:8080/configurations", {
     method: "POST",
@@ -11,20 +14,24 @@ const fetch = require("node-fetch");
   }
   console.log("Hi");
 
-  const array = Array(10000).fill(0);
-  await Promise.all(
-    array.map((item, index) =>
-      fetch("http://localhost:8080/data-streams/cars/documents", {
-        method: "POST",
-        body: JSON.stringify({
-          owner: "Hello-" + index,
-          quantity: index,
-          test: "AAA",
-          type: "cars",
-        }),
-      })
-    )
-  );
+  for (let i = 0; i < 100; i++) {
+    const array = Array(100000).fill(0);
+    await Promise.all(
+      chunk(array, 10000).map((item, index) =>
+        fetch("http://localhost:8080/data-streams/cars/documents", {
+          method: "POST",
+          body: JSON.stringify(
+            item.map((item, i2) => ({
+              owner: "Hello-" + (index * i2 + i2),
+              quantity: index * i2 + i2,
+              test: "AAA",
+              type: "cars",
+            }))
+          ),
+        })
+      )
+    );
+  }
 
   console.log("Hi");
 })().catch((e) => {
