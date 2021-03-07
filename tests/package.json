@@ -1,0 +1,14 @@
+{
+  "name": "flow-db-tests",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "node ./run.js"
+  },
+  "author": "Jesse Stolwijk <stolwijkjesse@gmail.com>",
+  "license": "ISC",
+  "dependencies": {
+    "node-fetch": "^2.6.1"
+  }
+}

@@ -191,10 +191,7 @@ func main() {
 			defer it.Close()
 			for it.Seek(keyPrefix); it.ValidForPrefix(keyPrefix); it.Next() {
 				item := it.Item()
-				k := item.Key()
 				err := item.Value(func(v []byte) error {
-					fmt.Printf("key=%s, value=%s\n", k, v)
-
 					item, err = txn.Get(v)
 
 					if err != nil {

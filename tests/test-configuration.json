@@ -35,7 +35,7 @@
           "quantity": {
             "type": "integer"
           },
-          "quality": {
+          "test": {
             "type": "string",
             "enum": ["AAA", "A", "B", "C"]
           },
@@ -43,7 +43,7 @@
             "type": "string"
           }
         },
-        "required": ["type", "quantity", "quality"]
+        "required": ["type", "quantity", "test"]
       }
     }
   ]
