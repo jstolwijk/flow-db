@@ -191,13 +191,13 @@ func main() {
 	r.GET("/api/data-streams/:streamName/recent", func(c *gin.Context) {
 		streamName := c.Param("streamName")
 		query := c.Request.URL.Query()
-		ascending := query.Get("order") == "ASC"
+		descending := query.Get("order") == "DESC"
 
 		keyPrefix := []byte(fmt.Sprintf("streams@%v/indices/", streamName))
 
 		startKey := keyPrefix
 
-		if ascending {
+		if descending {
 			startKey = append([]byte(fmt.Sprintf("streams@%v/indices/", streamName)), 0xFF)
 		}
 
@@ -209,7 +209,7 @@ func main() {
 			it := txn.NewIterator(badger.IteratorOptions{
 				PrefetchValues: true,
 				PrefetchSize:   100,
-				Reverse:        ascending,
+				Reverse:        descending,
 			})
 			defer it.Close()
 
