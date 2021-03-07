@@ -106,13 +106,24 @@ func main() {
 	r.POST("/api/data-streams/:streamName/documents", func(c *gin.Context) {
 		streamName := c.Param("streamName")
 
-		var body []interface{}
+		var body []map[string]interface{}
 		if err := c.ShouldBindJSON(&body); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
 
 		for _, i := range body {
+
+			id, err := seq.Next()
+
+			if err != nil {
+				c.Status(http.StatusInternalServerError)
+				return
+			}
+
+			i["_id"] = id
+			i["_dataStream"] = streamName
+			i["_timestamp"] = time.Now().Unix()
 
 			rawBody, err := json.Marshal(i)
 
@@ -155,12 +166,6 @@ func main() {
 			}
 
 			// Store
-			id, err := seq.Next()
-
-			if err != nil {
-				c.Status(http.StatusInternalServerError)
-				return
-			}
 
 			err = db.Update(func(txn *badger.Txn) error {
 				documentKey := fmt.Sprintf("streams@%v/documents/%v", streamName, id)
@@ -171,8 +176,7 @@ func main() {
 					return err
 				}
 
-				secs := time.Now().Unix()
-				key := fmt.Sprintf("streams@%v/indices/%d/%v", streamName, secs, id)
+				key := fmt.Sprintf("streams@%v/indices/%d/%v", streamName, i["_timestamp"], id)
 				err = txn.Set([]byte(key), []byte(documentKey))
 
 				return err
