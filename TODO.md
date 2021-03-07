@@ -4,6 +4,9 @@
 - create endpoint to apply new config
 - implement search api
 - allow to search on "keywords"
+- create "stream" api
+- expose grpc api from db app
+- move rest api into separate package
 
 # Data stream entries
 
