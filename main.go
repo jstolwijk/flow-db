@@ -12,8 +12,13 @@ import (
 	"github.com/qri-io/jsonschema"
 )
 
-type FlowDatabase struct {
-	inMemory bool
+type newConfigurationCommand struct {
+	DataStreams []dataStream `json:"dataStreams"`
+}
+
+type dataStream struct {
+	Name   string      `json:"name"`
+	Schema interface{} `json:"schema"`
 }
 
 func main() {
@@ -29,6 +34,7 @@ func main() {
 	}
 	defer db.Close()
 
+	// TODO: create sequence per index and create a deffered cleanup function
 	seq, err := db.GetSequence([]byte("id"), 1000)
 	defer seq.Release()
 
@@ -41,7 +47,63 @@ func main() {
 
 	ctx := context.Background()
 
-	r.POST("/index", func(c *gin.Context) {
+	r.POST("/configurations", func(c *gin.Context) {
+		var body newConfigurationCommand
+		if err := c.BindJSON(&body); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		err = db.Update(func(txn *badger.Txn) error {
+			dataStreamNames := make([]string, len(body.DataStreams))
+
+			var schema []byte
+			for index, dataStream := range body.DataStreams {
+				fmt.Printf("Creating index %v\n", dataStream.Name)
+				dataStreamNames[index] = dataStream.Name
+
+				key := fmt.Sprintf("streams@%v/schema", dataStream.Name)
+				schema, err = json.Marshal(dataStream.Schema)
+				err = txn.Set([]byte(key), schema)
+			}
+
+			rawBody, err := json.Marshal(dataStreamNames)
+
+			if err != nil {
+				return err
+			}
+
+			return txn.Set([]byte("streams"), rawBody)
+		})
+
+		c.Status(http.StatusAccepted)
+	})
+
+	r.GET("/configurations/current", func(c *gin.Context) {
+		var item *badger.Item
+		err := db.View(func(txn *badger.Txn) error {
+			item, err = txn.Get([]byte("streams"))
+			return err
+		})
+
+		if err != nil {
+			c.Status(http.StatusInternalServerError)
+		}
+
+		if item != nil {
+			item.Value(func(val []byte) error {
+				c.Header("Content-Type", "application/json")
+				c.Writer.Write(val)
+				return nil
+			})
+		} else {
+			c.Status(http.StatusInternalServerError)
+		}
+	})
+
+	r.POST("/data-streams/:streamName/documents", func(c *gin.Context) {
+		streamName := c.Param("streamName")
+
 		var body interface{}
 		if err := c.ShouldBindJSON(&body); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -56,32 +118,26 @@ func main() {
 		}
 
 		// Validate
-		var schemaData = []byte(`{
-			"$schema": "https://json-schema.org/draft/2019-09/schema",
-			"type": "object",
-			"properties": {
-			  "type": {
-				"type": "string"
-			  },
-			  "quantity": {
-				"type": "integer"
-			  },
-			  "quality": {
-				"type": "string",
-				"enum": ["AAA", "A", "B", "C"]
-			  },
-			  "owner": {
-				"type": "string"
-			  }
-			},
-			"required": ["type", "quantity", "quality"]
-		  }
-		  `)
+		var item *badger.Item
+		err = db.View(func(txn *badger.Txn) error {
+			key := fmt.Sprintf("streams@%v/schema", streamName)
+			item, err = txn.Get([]byte(key))
+			return err
+		})
+
+		if err != nil {
+			c.Status(http.StatusInternalServerError)
+		}
 
 		rs := &jsonschema.Schema{}
-		if err := json.Unmarshal(schemaData, rs); err != nil {
-			panic("unmarshal schema: " + err.Error())
-		}
+
+		err = item.Value(func(val []byte) error {
+			if err := json.Unmarshal(val, rs); err != nil {
+				panic("unmarshal schema: " + err.Error())
+			}
+
+			return err
+		})
 
 		errs, err := rs.ValidateBytes(ctx, rawBody)
 		if err != nil {
@@ -103,7 +159,7 @@ func main() {
 		}
 
 		err = db.Update(func(txn *badger.Txn) error {
-			key := fmt.Sprintf("item-%d", id)
+			key := fmt.Sprintf("streams@%v/documents/%v", streamName, id)
 
 			return txn.Set([]byte(key), rawBody)
 		})
@@ -112,13 +168,14 @@ func main() {
 			"_id": id,
 		})
 	})
-	r.GET("/documents", func(c *gin.Context) {
-		q := c.Request.URL.Query()
-		id := q["id"][0]
+
+	r.GET("/data-streams/:streamName/documents/:documentID", func(c *gin.Context) {
+		streamName := c.Param("streamName")
+		documentID := c.Param("documentID")
 
 		var item *badger.Item
 		err := db.View(func(txn *badger.Txn) error {
-			key := "item-" + id
+			key := fmt.Sprintf("streams@%v/documents/%v", streamName, documentID)
 
 			item, err = txn.Get([]byte(key))
 
