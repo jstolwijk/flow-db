@@ -11,6 +11,10 @@ enum SortDirection {
 const DataStream = () => {
   const [sortDirection, setSortDirection] = useState(SortDirection.DESC);
   const [dataStreamName, setDataStreamName] = useState<string | null>(null);
+  const { data, mutate, isValidating } = useSWR(
+    dataStreamName ? `/api/data-streams/${dataStreamName}/recent?order=${sortDirection}` : null,
+    fetcher
+  );
 
   return (
     <div>
@@ -25,7 +29,15 @@ const DataStream = () => {
         value={sortDirection}
         onValueSelected={(value) => setSortDirection(value as SortDirection)}
       />
-      {dataStreamName && <DataStreamDocuments sortDirection={sortDirection} dataStreamName={dataStreamName} />}
+      <button
+        type="button"
+        className="focus:outline-none text-white text-sm py-2.5 px-5 rounded-md bg-blue-500 hover:bg-blue-600 hover:shadow-lg"
+        onClick={() => mutate()}
+        disabled={isValidating}
+      >
+        {isValidating ? "Loading..." : "Reload"}
+      </button>
+      {dataStreamName && <DataStreamDocuments data={data} />}
     </div>
   );
 };
@@ -36,7 +48,7 @@ interface DataStreamSelectorProps {
 }
 
 const DataStreamSelector: React.FC<DataStreamSelectorProps> = ({ value, onValueSelected }) => {
-  const { data, error } = useSWR("/api/configurations/current", fetcher);
+  const { data, error, mutate } = useSWR("/api/configurations/current", fetcher);
 
   if (error) return <div>failed to load</div>;
   if (!data) return <div>loading...</div>;
@@ -52,25 +64,45 @@ const DataStreamSelector: React.FC<DataStreamSelectorProps> = ({ value, onValueS
 };
 
 interface DataStreamDocumentsProps {
-  dataStreamName: string;
-  sortDirection: SortDirection;
+  data: any[];
 }
 
-const DataStreamDocuments: React.FC<DataStreamDocumentsProps> = ({ dataStreamName, sortDirection }) => {
-  const { data } = useSWR(
-    dataStreamName ? `/api/data-streams/${dataStreamName}/recent?order=${sortDirection}` : null,
-    fetcher
-  );
-
+const DataStreamDocuments: React.FC<DataStreamDocumentsProps> = ({ data }) => {
   return (
     <ul>
-      {data?.map((dataStream: any, index: number) => (
-        <li key={index}>
-          <pre>{JSON.stringify(dataStream)}</pre>
-        </li>
-      ))}
+      <table className="table-auto">
+        <thead>
+          <tr>
+            <th>Timestamp</th>
+            <th>ID</th>
+            <th>Document</th>
+          </tr>
+        </thead>
+        <tbody>
+          {data?.map((dataStream: any, index: number) => (
+            <tr key={index}>
+              <td>{dataStream._timestamp}</td>
+              <td>{dataStream._id}</td>
+              <td>
+                <pre>{JSON.stringify(filterInternalFields(dataStream))}</pre>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </ul>
   );
+};
+
+const filterInternalFields = (json: any) => {
+  return Object.keys(json)
+    .filter((key) => !key.startsWith("_"))
+    .reduce((acc: any, curr: string) => {
+      return {
+        ...acc,
+        [curr]: json[curr],
+      };
+    }, {});
 };
 
 export default DataStream;
