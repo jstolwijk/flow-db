@@ -186,15 +186,41 @@ func main() {
 
 	r.GET("/data-streams/:streamName/recent", func(c *gin.Context) {
 		streamName := c.Param("streamName")
+		query := c.Request.URL.Query()
+		ascending := query.Get("order") == "ASC"
+
 		keyPrefix := []byte(fmt.Sprintf("streams@%v/indices/", streamName))
+
+		startKey := keyPrefix
+
+		if ascending {
+			startKey = append([]byte(fmt.Sprintf("streams@%v/indices/", streamName)), 0xFF)
+		}
 
 		items := make([][]byte, 0)
 
 		db.View(func(txn *badger.Txn) error {
-			it := txn.NewIterator(badger.DefaultIteratorOptions)
+
+			// Explanation how ordering works: https://github.com/dgraph-io/badger/issues/347
+			it := txn.NewIterator(badger.IteratorOptions{
+				PrefetchValues: true,
+				PrefetchSize:   100,
+				Reverse:        ascending,
+			})
 			defer it.Close()
-			for it.Seek(keyPrefix); it.ValidForPrefix(keyPrefix); it.Next() {
+
+			numberOfItems := 0
+
+			// TODO: Make sure this is thread safe
+			for it.Seek(startKey); it.ValidForPrefix(keyPrefix); it.Next() {
 				item := it.Item()
+
+				if numberOfItems >= 500 {
+					return nil
+				}
+
+				numberOfItems++
+
 				err := item.Value(func(v []byte) error {
 					item, err = txn.Get(v)
 
@@ -204,6 +230,7 @@ func main() {
 
 					return item.Value(func(v []byte) error {
 						items = append(items, v)
+
 						return nil
 					})
 				})
