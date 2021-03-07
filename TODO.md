@@ -7,7 +7,7 @@
 - create "stream" api
 - expose grpc api from db app
 - move rest api into separate package
-
+- use batch write to improve indexing performance https://github.com/dgraph-io/badger/issues/869
 # Data stream entries
 
 ## streams
