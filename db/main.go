@@ -112,6 +112,9 @@ func main() {
 			return
 		}
 
+		wb := db.NewWriteBatch()
+		defer wb.Cancel()
+
 		for _, i := range body {
 
 			id, err := seq.Next()
@@ -166,23 +169,26 @@ func main() {
 			}
 
 			// Store
+			documentKey := fmt.Sprintf("streams@%v/documents/%v", streamName, id)
 
-			err = db.Update(func(txn *badger.Txn) error {
-				documentKey := fmt.Sprintf("streams@%v/documents/%v", streamName, id)
+			err = wb.Set([]byte(documentKey), rawBody)
 
-				err := txn.Set([]byte(documentKey), rawBody)
+			if err != nil {
+				c.Status(http.StatusInternalServerError)
+				return
+			}
 
-				if err != nil {
-					return err
-				}
+			key := fmt.Sprintf("streams@%v/indices/%d/%v", streamName, i["_timestamp"], id)
+			err = wb.Set([]byte(key), []byte(documentKey))
 
-				key := fmt.Sprintf("streams@%v/indices/%d/%v", streamName, i["_timestamp"], id)
-				err = txn.Set([]byte(key), []byte(documentKey))
-
-				return err
-			})
-
+			if err != nil {
+				c.Status(http.StatusInternalServerError)
+				return
+			}
 		}
+
+		wb.Flush()
+
 		c.JSON(http.StatusCreated, gin.H{
 			"_id": "todo",
 		})

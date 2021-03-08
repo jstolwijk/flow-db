@@ -13,11 +13,12 @@ const chunk = (arr, size) =>
     throw new Error("Failed to apply test configuration", resp.body);
   }
   console.log("Hi");
+  const array = Array(100000).fill(0);
+  const data = chunk(array, 50000);
 
   for (let i = 0; i < 5; i++) {
-    const array = Array(100000).fill(0);
     await Promise.all(
-      chunk(array, 10000).map((item, index) =>
+      data.map((item, index) =>
         fetch("http://localhost:8080/api/data-streams/cars/documents", {
           method: "POST",
           body: JSON.stringify(
