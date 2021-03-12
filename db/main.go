@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	badger "github.com/dgraph-io/badger/v3"
@@ -13,6 +14,10 @@ import (
 	"github.com/qri-io/jsonschema"
 )
 
+type searchCommand struct {
+	DataStream string `json:"dataStream"`
+	Query      string `json:"query"`
+}
 type newConfigurationCommand struct {
 	DataStreams []dataStream `json:"dataStreams"`
 }
@@ -178,8 +183,21 @@ func main() {
 				return
 			}
 
+			// Time based search
 			key := fmt.Sprintf("streams@%v/indices/%d/%v", streamName, i["_timestamp"], id)
 			err = wb.Set([]byte(key), []byte(documentKey))
+
+			if err != nil {
+				c.Status(http.StatusInternalServerError)
+				return
+			}
+
+			// Index all fields
+			for fieldName, fieldValue := range i {
+				// "streams@<streamName>/fields/<fieldName>/<fieldValue>/<timestamp>/<documentId>"
+				dbKey := fmt.Sprintf("streams@%v/fields/%v/%v/%d/%v", streamName, fieldName, fieldValue, i["_timestamp"], id)
+				err = wb.Set([]byte(dbKey), []byte(documentKey))
+			}
 
 			if err != nil {
 				c.Status(http.StatusInternalServerError)
@@ -192,6 +210,103 @@ func main() {
 		c.JSON(http.StatusCreated, gin.H{
 			"_id": "todo",
 		})
+	})
+
+	r.POST("/api/search", func(c *gin.Context) {
+		var body searchCommand
+		if err := c.ShouldBindJSON(&body); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		split := strings.Split(strings.ReplaceAll(body.Query, " ", ""), ":")
+
+		fieldName := split[0]
+		fieldValue := split[1]
+
+		keyPrefix := []byte(fmt.Sprintf("streams@%v/fields/%v/%v", body.DataStream, fieldName, fieldValue))
+
+		items := make([][]byte, 0)
+
+		db.View(func(txn *badger.Txn) error {
+
+			// Explanation how ordering works: https://github.com/dgraph-io/badger/issues/347
+			it := txn.NewIterator(badger.IteratorOptions{
+				PrefetchValues: true,
+				PrefetchSize:   100,
+				Reverse:        false,
+			})
+			defer it.Close()
+
+			numberOfItems := 0
+
+			// TODO: Make sure this is thread safe
+			for it.Seek(keyPrefix); it.ValidForPrefix(keyPrefix); it.Next() {
+				item := it.Item()
+
+				if numberOfItems >= 100 {
+					return nil
+				}
+
+				numberOfItems++
+
+				err := item.Value(func(v []byte) error {
+					item, err = txn.Get(v)
+
+					if err != nil {
+						return err
+					}
+
+					return item.Value(func(v []byte) error {
+						items = append(items, v)
+
+						return nil
+					})
+				})
+				if err != nil {
+					return err
+				}
+			}
+			return nil
+		})
+
+		data, err := ToJSONArray(items)
+
+		if err != nil {
+			c.Status(http.StatusInternalServerError)
+			return
+		}
+
+		c.Header("Content-Type", "application/json")
+		c.Writer.Write(data)
+	})
+
+	r.GET("/api/data-streams/:streamName/schema", func(c *gin.Context) {
+		streamName := c.Param("streamName")
+
+		var item *badger.Item
+		err = db.View(func(txn *badger.Txn) error {
+			key := fmt.Sprintf("streams@%v/schema", streamName)
+			item, err = txn.Get([]byte(key))
+			return err
+		})
+
+		if err != nil {
+			c.Status(http.StatusInternalServerError)
+			return
+		}
+
+		err := item.Value(func(data []byte) error {
+			c.Header("Content-Type", "application/json")
+			c.Writer.Write(data)
+
+			return nil
+		})
+
+		if err != nil {
+			c.Status(http.StatusInternalServerError)
+			return
+		}
 	})
 
 	r.GET("/api/data-streams/:streamName/recent", func(c *gin.Context) {
