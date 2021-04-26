@@ -1,4 +1,5 @@
 const fetch = require("node-fetch");
+const faker = require("faker");
 
 const chunk = (arr, size) =>
   Array.from({ length: Math.ceil(arr.length / size) }, (v, i) => arr.slice(i * size, i * size + size));
@@ -23,10 +24,10 @@ const chunk = (arr, size) =>
           method: "POST",
           body: JSON.stringify(
             item.map((item, i2) => ({
-              owner: "Hello-" + (index * i2 + i2),
+              owner: faker.name.findName(),
               quantity: index * i2 + i2,
               test: "AAA",
-              type: "cars",
+              type: faker.animal.type(),
             }))
           ),
         })

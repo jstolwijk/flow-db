@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -17,6 +19,7 @@ import (
 type searchCommand struct {
 	DataStream string `json:"dataStream"`
 	Query      string `json:"query"`
+	MaxResults *int   `json:"maxResults"`
 }
 type newConfigurationCommand struct {
 	DataStreams []dataStream `json:"dataStreams"`
@@ -45,6 +48,7 @@ func main() {
 	defer seq.Release()
 
 	r := gin.Default()
+
 	r.GET("/api/health", func(c *gin.Context) {
 		c.JSON(200, gin.H{
 			"status": "UP",
@@ -219,56 +223,40 @@ func main() {
 			return
 		}
 
-		split := strings.Split(strings.ReplaceAll(body.Query, " ", ""), ":")
+		terms := strings.Split(body.Query, " OR ")
 
-		fieldName := split[0]
-		fieldValue := split[1]
+		var results [][]ItemDTO
 
-		keyPrefix := []byte(fmt.Sprintf("streams@%v/fields/%v/%v", body.DataStream, fieldName, fieldValue))
+		for _, term := range terms {
 
-		items := make([][]byte, 0)
+			split := strings.Split(strings.ReplaceAll(term, " ", ""), ":")
 
-		db.View(func(txn *badger.Txn) error {
+			fieldName := split[0]
+			fieldValue := split[1]
 
-			// Explanation how ordering works: https://github.com/dgraph-io/badger/issues/347
-			it := txn.NewIterator(badger.IteratorOptions{
-				PrefetchValues: true,
-				PrefetchSize:   100,
-				Reverse:        false,
-			})
-			defer it.Close()
+			// Remove the / at the end of the key to search on values starting with the specified fieldValue
+			// keyPrefix := []byte(fmt.Sprintf("streams@%v/fields/%v/%v", body.DataStream, fieldName, fieldValue))
 
-			numberOfItems := 0
+			keyPrefix := []byte(fmt.Sprintf("streams@%v/fields/%v/%v/", body.DataStream, fieldName, fieldValue))
 
-			// TODO: Make sure this is thread safe
-			for it.Seek(keyPrefix); it.ValidForPrefix(keyPrefix); it.Next() {
-				item := it.Item()
+			maxResults := body.MaxResults
 
-				if numberOfItems >= 100 {
-					return nil
-				}
-
-				numberOfItems++
-
-				err := item.Value(func(v []byte) error {
-					item, err = txn.Get(v)
-
-					if err != nil {
-						return err
-					}
-
-					return item.Value(func(v []byte) error {
-						items = append(items, v)
-
-						return nil
-					})
-				})
-				if err != nil {
-					return err
-				}
+			if maxResults == nil {
+				var d int = 100
+				maxResults = &d
 			}
-			return nil
-		})
+
+			items, err := seekItems(db, keyPrefix, *maxResults)
+
+			if err != nil {
+				c.Status(http.StatusInternalServerError)
+				return
+			}
+
+			results = append(results, items)
+		}
+
+		items := merge(results)
 
 		data, err := ToJSONArray(items)
 
@@ -407,4 +395,94 @@ func main() {
 	r.Run()
 
 	// Your code here…
+}
+
+type ItemDTO struct {
+	Key   string
+	Value []byte
+}
+
+func getTimestamp(key string) int {
+	split := strings.Split(key, "/")
+	time := split[len(split)-2]
+	i, err := strconv.Atoi(time)
+
+	if err != nil {
+		panic(err)
+	}
+
+	return i
+}
+
+func merge(items [][]ItemDTO) [][]byte {
+	var concatList []ItemDTO
+
+	for _, sub := range items {
+		for _, item := range sub {
+			concatList = append(concatList, item)
+		}
+	}
+
+	sort.Slice(concatList, func(i, j int) bool {
+		return concatList[i].Key > concatList[j].Key
+	})
+
+	var finalList [][]byte
+	for _, item := range concatList {
+		finalList = append(finalList, item.Value)
+	}
+
+	return finalList
+}
+
+func seekItems(db *badger.DB, keyPrefix []byte, maxResults int) ([]ItemDTO, error) {
+	var items []ItemDTO
+
+	err := db.View(func(txn *badger.Txn) error {
+
+		// Explanation how ordering works: https://github.com/dgraph-io/badger/issues/347
+		it := txn.NewIterator(badger.IteratorOptions{
+			PrefetchValues: true,
+			PrefetchSize:   maxResults,
+			Reverse:        false,
+		})
+		defer it.Close()
+
+		numberOfItems := 0
+
+		// TODO: Make sure this is thread safe
+		for it.Seek(keyPrefix); it.ValidForPrefix(keyPrefix); it.Next() {
+			item := it.Item()
+
+			if numberOfItems >= maxResults {
+				return nil
+			}
+
+			numberOfItems++
+
+			err := item.Value(func(v []byte) error {
+				item, err := txn.Get(v)
+
+				if err != nil {
+					return err
+				}
+
+				return item.Value(func(v []byte) error {
+					items = append(items, ItemDTO{Key: string(item.Key()), Value: v})
+
+					return nil
+				})
+			})
+			if err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+
+	if err != nil {
+		return items, err
+	}
+
+	return items, nil
 }
