@@ -5,5 +5,5 @@ go 1.15
 require (
 	github.com/dgraph-io/badger/v3 v3.2011.1
 	github.com/gin-gonic/gin v1.6.3
-	github.com/qri-io/jsonschema v0.2.0 // indirect
+	github.com/qri-io/jsonschema v0.2.0
 )

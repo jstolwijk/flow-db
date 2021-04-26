@@ -14,7 +14,7 @@ const chunk = (arr, size) =>
   }
   console.log("Hi");
   const array = Array(100000).fill(0);
-  const data = chunk(array, 50000);
+  const data = chunk(array, 10000);
 
   for (let i = 0; i < 5; i++) {
     await Promise.all(

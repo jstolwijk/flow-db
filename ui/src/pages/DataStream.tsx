@@ -13,7 +13,8 @@ const DataStream = () => {
   const [dataStreamName, setDataStreamName] = useState<string | null>(null);
   const { data, mutate, isValidating } = useSWR(
     dataStreamName ? `/api/data-streams/${dataStreamName}/recent?order=${sortDirection}` : null,
-    fetcher
+    fetcher,
+    { refreshInterval: 10000 }
   );
 
   return (
