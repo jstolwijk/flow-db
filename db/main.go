@@ -398,8 +398,9 @@ func main() {
 }
 
 type ItemDTO struct {
-	Key   string
-	Value []byte
+	Key       string
+	Timestamp int
+	Value     []byte
 }
 
 func getTimestamp(key string) int {
@@ -424,7 +425,9 @@ func merge(items [][]ItemDTO) [][]byte {
 	}
 
 	sort.Slice(concatList, func(i, j int) bool {
-		return concatList[i].Key > concatList[j].Key
+		fmt.Println(concatList[i].Key)
+
+		return concatList[i].Timestamp > concatList[j].Timestamp
 	})
 
 	var finalList [][]byte
@@ -461,14 +464,15 @@ func seekItems(db *badger.DB, keyPrefix []byte, maxResults int) ([]ItemDTO, erro
 			numberOfItems++
 
 			err := item.Value(func(v []byte) error {
-				item, err := txn.Get(v)
+				document, err := txn.Get(v)
 
 				if err != nil {
 					return err
 				}
 
-				return item.Value(func(v []byte) error {
-					items = append(items, ItemDTO{Key: string(item.Key()), Value: v})
+				return document.Value(func(v []byte) error {
+					itemKey := string(item.Key())
+					items = append(items, ItemDTO{Key: itemKey, Value: v, Timestamp: getTimestamp(itemKey)})
 
 					return nil
 				})
