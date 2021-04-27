@@ -121,6 +121,29 @@ func main() {
 		wb := db.NewWriteBatch()
 		defer wb.Cancel()
 
+		// Validate
+		// TODO: Cache the schema
+		var item *badger.Item
+		err = db.View(func(txn *badger.Txn) error {
+			key := fmt.Sprintf("streams@%v/schema", streamName)
+			item, err = txn.Get([]byte(key))
+			return err
+		})
+
+		if err != nil {
+			c.Status(http.StatusInternalServerError)
+		}
+
+		rs := &jsonschema.Schema{}
+
+		err = item.Value(func(val []byte) error {
+			if err := json.Unmarshal(val, rs); err != nil {
+				panic("unmarshal schema: " + err.Error())
+			}
+
+			return err
+		})
+
 		for _, i := range body {
 
 			id, err := seq.Next()
@@ -132,7 +155,7 @@ func main() {
 
 			i["_id"] = id
 			i["_dataStream"] = streamName
-			i["_timestamp"] = time.Now().Unix()
+			i["_timestamp"] = currentTime()
 
 			rawBody, err := json.Marshal(i)
 
@@ -140,28 +163,6 @@ func main() {
 				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 				return
 			}
-
-			// Validate
-			var item *badger.Item
-			err = db.View(func(txn *badger.Txn) error {
-				key := fmt.Sprintf("streams@%v/schema", streamName)
-				item, err = txn.Get([]byte(key))
-				return err
-			})
-
-			if err != nil {
-				c.Status(http.StatusInternalServerError)
-			}
-
-			rs := &jsonschema.Schema{}
-
-			err = item.Value(func(val []byte) error {
-				if err := json.Unmarshal(val, rs); err != nil {
-					panic("unmarshal schema: " + err.Error())
-				}
-
-				return err
-			})
 
 			errs, err := rs.ValidateBytes(ctx, rawBody)
 			if err != nil {
@@ -341,4 +342,8 @@ func main() {
 	r.Run()
 
 	// Your code here…
+}
+
+func currentTime() int64 {
+	return time.Now().UnixNano() / int64(time.Millisecond)
 }
