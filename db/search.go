@@ -11,6 +11,20 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+type SortingDirection string
+
+const (
+	Ascending  SortingDirection = "ascending"
+	Descending SortingDirection = "descending"
+)
+
+type searchCommand struct {
+	DataStream       string           `json:"dataStream"`
+	Query            string           `json:"query"`
+	MaxResults       *int             `json:"maxResults"`
+	SortingDirection SortingDirection `json:"sortingDirection"`
+}
+
 func search(db *badger.DB, c *gin.Context) {
 	var body searchCommand
 	if err := c.ShouldBindJSON(&body); err != nil {
@@ -41,9 +55,10 @@ func search(db *badger.DB, c *gin.Context) {
 
 		keyPrefix := []byte(fmt.Sprintf("streams@%v/fields/%v/%v/", body.DataStream, fieldName, fieldValue))
 
-		items, err := seekItems(db, keyPrefix, *maxResults)
+		items, err := seekItems(db, keyPrefix, *maxResults, body.SortingDirection)
 
 		if err != nil {
+			fmt.Println("Error ", err)
 			c.Status(http.StatusInternalServerError)
 			return
 		}
@@ -51,7 +66,10 @@ func search(db *badger.DB, c *gin.Context) {
 		results = append(results, items)
 	}
 
-	items := merge(results)[:*maxResults] // merge lists and slice the slice to desired size
+	mergedResults := merge(results, body.SortingDirection) // merge lists and slice the slice to desired size
+
+	nrOfResultsToReturn := min(*maxResults, len(mergedResults))
+	items := mergedResults[:nrOfResultsToReturn]
 
 	txn := db.NewTransaction(false)
 
@@ -61,6 +79,7 @@ func search(db *badger.DB, c *gin.Context) {
 		document, err := findDocument(txn, item)
 
 		if err != nil {
+			fmt.Println("Error ", err)
 			c.Status(http.StatusInternalServerError)
 			return
 		}
@@ -71,6 +90,7 @@ func search(db *badger.DB, c *gin.Context) {
 	data, err := ToJSONArray(documentValues)
 
 	if err != nil {
+		fmt.Println("Error ", err)
 		c.Status(http.StatusInternalServerError)
 		return
 	}
@@ -98,7 +118,7 @@ func getTimestamp(key string) int {
 	return i
 }
 
-func merge(items [][]SeekResult) []SeekResult {
+func merge(items [][]SeekResult, sortingDirection SortingDirection) []SeekResult {
 	var concatList []SeekResult
 
 	for _, sub := range items {
@@ -107,9 +127,15 @@ func merge(items [][]SeekResult) []SeekResult {
 		}
 	}
 
-	sort.Slice(concatList, func(i, j int) bool {
-		return concatList[i].Timestamp > concatList[j].Timestamp
-	})
+	if sortingDirection == Descending {
+		sort.Slice(concatList, func(i, j int) bool {
+			return concatList[i].Timestamp > concatList[j].Timestamp
+		})
+	} else {
+		sort.Slice(concatList, func(i, j int) bool {
+			return concatList[i].Timestamp < concatList[j].Timestamp
+		})
+	}
 
 	return concatList
 }
@@ -124,6 +150,7 @@ func findDocument(db *badger.Txn, seekResult SeekResult) (*Document, error) {
 	result, err := db.Get(seekResult.Value)
 
 	if err != nil {
+		fmt.Println(fmt.Sprintf("Could not find document: %s ref: %s", string(seekResult.Value), seekResult.Key))
 		return nil, err
 	}
 
@@ -136,30 +163,38 @@ func findDocument(db *badger.Txn, seekResult SeekResult) (*Document, error) {
 	})
 
 	if err != nil {
+		fmt.Println("Error ", seekResult)
 		return nil, err
 	}
 
 	return document, nil
 }
 
-func seekItems(db *badger.DB, keyPrefix []byte, maxResults int) ([]SeekResult, error) {
+func seekItems(db *badger.DB, keyPrefix []byte, maxResults int, sortingDirection SortingDirection) ([]SeekResult, error) {
 	var items []SeekResult
 
 	err := db.View(func(txn *badger.Txn) error {
 
-		// Explanation how ordering works: https://github.com/dgraph-io/badger/issues/347
+		startKey := keyPrefix
+
+		if sortingDirection == Descending {
+			startKey = append(keyPrefix, 0xFF)
+		}
+
 		it := txn.NewIterator(badger.IteratorOptions{
 			PrefetchValues: true,
 			PrefetchSize:   maxResults,
-			Reverse:        false,
+			Reverse:        sortingDirection == Descending,
 		})
+
 		defer it.Close()
 
 		numberOfItems := 0
 
 		// TODO: Make sure this is thread safe
-		for it.Seek(keyPrefix); it.ValidForPrefix(keyPrefix); it.Next() {
+		for it.Seek(startKey); it.ValidForPrefix(keyPrefix); it.Next() {
 			item := it.Item()
+			key := string(item.Key())
 
 			if numberOfItems >= maxResults {
 				return nil
@@ -167,12 +202,23 @@ func seekItems(db *badger.DB, keyPrefix []byte, maxResults int) ([]SeekResult, e
 
 			numberOfItems++
 
-			item.Value(func(v []byte) error {
-				itemKey := string(item.Key())
-				items = append(items, SeekResult{Key: itemKey, Value: v, Timestamp: getTimestamp(itemKey)})
+			err := item.Value(func(value []byte) error {
+				/*
+				 * TODO FIX THIS SHIT
+				 * Results where fucked since this fucking badger db client will just override the same address space over and over again
+				 * To fix this shit i've decided to make a deep copy of the value in a different part of memory
+				 * code is supper inefficient right now, consider rewrite using channels :)
+				 */
+				var b = make([]byte, len(value))
+				copy(b, value)
+
+				items = append(items, SeekResult{Key: key, Value: b, Timestamp: getTimestamp(key)})
 				return nil
 			})
 
+			if err != nil {
+				return err
+			}
 		}
 		return nil
 	})
@@ -182,4 +228,11 @@ func seekItems(db *badger.DB, keyPrefix []byte, maxResults int) ([]SeekResult, e
 	}
 
 	return items, nil
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
