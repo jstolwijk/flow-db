@@ -18,21 +18,22 @@ const chunk = (arr, size) =>
   const data = chunk(array, 10000);
 
   for (let i = 0; i < 5; i++) {
-    await Promise.all(
-      data.map((item, index) =>
-        fetch("http://localhost:8080/api/data-streams/cars/documents", {
-          method: "POST",
-          body: JSON.stringify(
-            item.map((item, i2) => ({
-              owner: faker.name.findName(),
-              quantity: index * i2 + i2,
-              test: "AAA",
-              type: faker.animal.type(),
-            }))
-          ),
-        })
-      )
-    );
+    // await Promise.all(
+    data.forEach(async (item, index) => {
+      const result = await fetch("http://localhost:8080/api/data-streams/cars/documents", {
+        method: "POST",
+        body: JSON.stringify(
+          item.map((item, i2) => ({
+            owner: faker.name.findName(),
+            quantity: index * i2 + i2,
+            test: "AAA",
+            type: faker.animal.type(),
+          }))
+        ),
+      });
+
+      console.log("Finished call");
+    });
   }
 
   console.log("Hi");

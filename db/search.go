@@ -32,7 +32,7 @@ func search(db *badger.DB, c *gin.Context) {
 		return
 	}
 
-	terms := strings.Split(body.Query, " OR ")
+	terms := parse(body.Query)
 
 	var results [][]SeekResult
 
@@ -43,27 +43,35 @@ func search(db *badger.DB, c *gin.Context) {
 		maxResults = &d
 	}
 
-	for _, term := range terms {
+	for _, or := range terms.Or {
+		fmt.Println("Orrrr")
+		for _, and := range or.And {
+			fmt.Println("Anddd")
+			if and.Operand != nil {
+				fmt.Println("Yeah budy")
 
-		split := strings.Split(strings.ReplaceAll(term, " ", ""), ":")
+				fieldName := and.Operand.Operand.Summand[0].LHS.LHS.SymbolRef.Symbol
+				fieldValue := and.Operand.ConditionRHS.Compare.Operand.Summand[0].LHS.LHS.Value.Number
 
-		fieldName := split[0]
-		fieldValue := split[1]
+				fmt.Println(fmt.Sprintf("fieldName: %v, fieldValue: %v", fieldName, *fieldValue))
 
-		// Remove the / at the end of the key to search on values starting with the specified fieldValue
-		// keyPrefix := []byte(fmt.Sprintf("streams@%v/fields/%v/%v", body.DataStream, fieldName, fieldValue))
+				// Remove the / at the end of the key to search on values starting with the specified fieldValue
+				// keyPrefix := []byte(fmt.Sprintf("streams@%v/fields/%v/%v", body.DataStream, fieldName, fieldValue))
+				keyPrefix := []byte(fmt.Sprintf("streams@%v/fields/%v/%v/", body.DataStream, fieldName, *fieldValue))
 
-		keyPrefix := []byte(fmt.Sprintf("streams@%v/fields/%v/%v/", body.DataStream, fieldName, fieldValue))
+				items, err := seekItems(db, keyPrefix, *maxResults, body.SortingDirection)
 
-		items, err := seekItems(db, keyPrefix, *maxResults, body.SortingDirection)
+				if err != nil {
+					fmt.Println("Error ", err)
+					c.Status(http.StatusInternalServerError)
+					return
+				}
 
-		if err != nil {
-			fmt.Println("Error ", err)
-			c.Status(http.StatusInternalServerError)
-			return
+				results = append(results, items)
+			} else {
+				panic("Not is not implemented")
+			}
 		}
-
-		results = append(results, items)
 	}
 
 	mergedResults := merge(results, body.SortingDirection) // merge lists and slice the slice to desired size

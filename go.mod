@@ -3,6 +3,8 @@ module github.com/jstolwijk/flow-db
 go 1.15
 
 require (
+	github.com/alecthomas/participle v0.7.1
+	github.com/alecthomas/participle/v2 v2.0.0-alpha5 // indirect
 	github.com/dgraph-io/badger/v3 v3.2011.1
 	github.com/gin-gonic/gin v1.7.1
 	github.com/go-playground/validator/v10 v10.5.0 // indirect
