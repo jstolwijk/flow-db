@@ -131,6 +131,7 @@ func seekItems(db *badger.DB, keyPrefix []byte, maxResults int) ([]ItemDTO, erro
 			numberOfItems++
 
 			err := item.Value(func(v []byte) error {
+				// TODO: Move retrieving of the document to the end of the /api/search function
 				document, err := txn.Get(v)
 
 				if err != nil {
