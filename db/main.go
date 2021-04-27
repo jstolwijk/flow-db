@@ -13,11 +13,6 @@ import (
 	"github.com/qri-io/jsonschema"
 )
 
-type searchCommand struct {
-	DataStream string `json:"dataStream"`
-	Query      string `json:"query"`
-	MaxResults *int   `json:"maxResults"`
-}
 type newConfigurationCommand struct {
 	DataStreams []dataStream `json:"dataStreams"`
 }
@@ -25,6 +20,10 @@ type newConfigurationCommand struct {
 type dataStream struct {
 	Name   string      `json:"name"`
 	Schema interface{} `json:"schema"`
+}
+
+type debugDbRequest struct {
+	Key string `json:"key"`
 }
 
 func main() {
@@ -339,6 +338,28 @@ func main() {
 			c.Status(http.StatusInternalServerError)
 		}
 	})
+	r.POST("/debug/db", func(c *gin.Context) {
+		var body debugDbRequest
+		if err := c.BindJSON(&body); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		var item *badger.Item
+		err = db.View(func(txn *badger.Txn) error {
+			item, err = txn.Get([]byte(body.Key))
+			return err
+		})
+
+		item.Value(func(val []byte) error {
+			c.Header("Content-Type", "application/json")
+			c.Writer.Write(val)
+			return nil
+		})
+
+		return
+	})
+
 	r.Run()
 
 	// Your code here…
