@@ -20,7 +20,14 @@ func search(db *badger.DB, c *gin.Context) {
 
 	terms := strings.Split(body.Query, " OR ")
 
-	var results [][]ItemDTO
+	var results [][]SeekResult
+
+	maxResults := body.MaxResults
+
+	if maxResults == nil {
+		var d int = 100
+		maxResults = &d
+	}
 
 	for _, term := range terms {
 
@@ -34,13 +41,6 @@ func search(db *badger.DB, c *gin.Context) {
 
 		keyPrefix := []byte(fmt.Sprintf("streams@%v/fields/%v/%v/", body.DataStream, fieldName, fieldValue))
 
-		maxResults := body.MaxResults
-
-		if maxResults == nil {
-			var d int = 100
-			maxResults = &d
-		}
-
 		items, err := seekItems(db, keyPrefix, *maxResults)
 
 		if err != nil {
@@ -51,9 +51,24 @@ func search(db *badger.DB, c *gin.Context) {
 		results = append(results, items)
 	}
 
-	items := merge(results)
+	items := merge(results)[:*maxResults] // merge lists and slice the slice to desired size
 
-	data, err := ToJSONArray(items)
+	txn := db.NewTransaction(false)
+
+	documentValues := make([][]byte, 0)
+
+	for _, item := range items {
+		document, err := findDocument(txn, item)
+
+		if err != nil {
+			c.Status(http.StatusInternalServerError)
+			return
+		}
+
+		documentValues = append(documentValues, document.Value)
+	}
+
+	data, err := ToJSONArray(documentValues)
 
 	if err != nil {
 		c.Status(http.StatusInternalServerError)
@@ -64,10 +79,11 @@ func search(db *badger.DB, c *gin.Context) {
 	c.Writer.Write(data)
 }
 
-type ItemDTO struct {
-	Key       string
-	Timestamp int
-	Value     []byte
+type Document struct {
+	SeekResultKey string
+	Key           string
+	Timestamp     int
+	Value         []byte
 }
 
 func getTimestamp(key string) int {
@@ -82,8 +98,8 @@ func getTimestamp(key string) int {
 	return i
 }
 
-func merge(items [][]ItemDTO) [][]byte {
-	var concatList []ItemDTO
+func merge(items [][]SeekResult) []SeekResult {
+	var concatList []SeekResult
 
 	for _, sub := range items {
 		for _, item := range sub {
@@ -92,21 +108,42 @@ func merge(items [][]ItemDTO) [][]byte {
 	}
 
 	sort.Slice(concatList, func(i, j int) bool {
-		fmt.Println(concatList[i].Key)
-
 		return concatList[i].Timestamp > concatList[j].Timestamp
 	})
 
-	var finalList [][]byte
-	for _, item := range concatList {
-		finalList = append(finalList, item.Value)
-	}
-
-	return finalList
+	return concatList
 }
 
-func seekItems(db *badger.DB, keyPrefix []byte, maxResults int) ([]ItemDTO, error) {
-	var items []ItemDTO
+type SeekResult struct {
+	Key       string
+	Timestamp int
+	Value     []byte
+}
+
+func findDocument(db *badger.Txn, seekResult SeekResult) (*Document, error) {
+	result, err := db.Get(seekResult.Value)
+
+	if err != nil {
+		return nil, err
+	}
+
+	var document *Document
+
+	err = result.Value(func(v []byte) error {
+		doc := Document{Key: string(result.Key()), SeekResultKey: seekResult.Key, Value: v, Timestamp: getTimestamp(seekResult.Key)}
+		document = &doc
+		return nil
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	return document, nil
+}
+
+func seekItems(db *badger.DB, keyPrefix []byte, maxResults int) ([]SeekResult, error) {
+	var items []SeekResult
 
 	err := db.View(func(txn *badger.Txn) error {
 
@@ -130,24 +167,12 @@ func seekItems(db *badger.DB, keyPrefix []byte, maxResults int) ([]ItemDTO, erro
 
 			numberOfItems++
 
-			err := item.Value(func(v []byte) error {
-				// TODO: Move retrieving of the document to the end of the /api/search function
-				document, err := txn.Get(v)
-
-				if err != nil {
-					return err
-				}
-
-				return document.Value(func(v []byte) error {
-					itemKey := string(item.Key())
-					items = append(items, ItemDTO{Key: itemKey, Value: v, Timestamp: getTimestamp(itemKey)})
-
-					return nil
-				})
+			item.Value(func(v []byte) error {
+				itemKey := string(item.Key())
+				items = append(items, SeekResult{Key: itemKey, Value: v, Timestamp: getTimestamp(itemKey)})
+				return nil
 			})
-			if err != nil {
-				return err
-			}
+
 		}
 		return nil
 	})
